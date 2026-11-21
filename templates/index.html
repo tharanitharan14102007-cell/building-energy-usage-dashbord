@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Building Energy Usage Analysis Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+  <!-- Top Navigation Bar -->
+  <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center space-x-3">
+        <div class="h-9 w-9 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-lg font-bold tracking-tight text-white flex items-center gap-2">
+            EcoPulse BMS <span class="text-xs font-medium px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">ASHRAE 90.1</span>
+          </h1>
+          <p class="text-xs text-slate-400">Building Energy Usage & Demand Intelligence Platform</p>
+        </div>
+      </div>
+
+      <!-- Controls: Building & Date Range -->
+      <div class="flex items-center flex-wrap gap-2.5">
+        <select id="buildingSelect" class="bg-slate-800 border border-slate-700 text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-200">
+          {% for b in buildings %}
+            <option value="{{ b.id }}">{{ b.name }} ({{ b.type }})</option>
+          {% endfor %}
+        </select>
+
+        <div class="inline-flex rounded-lg border border-slate-800 bg-slate-900 p-0.5" id="rangeToggle">
+          <button data-days="1" class="range-btn px-2.5 py-1 text-xs rounded-md text-slate-400 hover:text-white transition">24h</button>
+          <button data-days="7" class="range-btn px-2.5 py-1 text-xs rounded-md bg-emerald-600 text-white font-medium transition">7d</button>
+          <button data-days="14" class="range-btn px-2.5 py-1 text-xs rounded-md text-slate-400 hover:text-white transition">14d</button>
+          <button data-days="30" class="range-btn px-2.5 py-1 text-xs rounded-md text-slate-400 hover:text-white transition">30d</button>
+        </div>
+
+        <button id="exportBtn" class="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs px-3 py-1.5 rounded-lg text-slate-300 font-medium transition">
+          <svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+          </svg>
+          Export CSV
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Container -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+    <!-- KPI Summary Grid -->
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3.5" id="kpiGrid">
+      <div class="bg-slate-900/70 border border-slate-800/80 rounded-xl p-3.5">
+        <span class="text-xs text-slate-400 font-medium block">Total Net Energy</span>
+        <div class="text-xl font-bold text-white mt-1" id="kpiNetEnergy">-- MWh</div>
+        <div class="text-[11px] text-slate-500 mt-1 flex items-center gap-1">
+          <span class="text-emerald-400 font-medium" id="kpiSolarOffset">--%</span> solar offset
+        </div>
+      </div>
+
+      <div class="bg-slate-900/70 border border-slate-800/80 rounded-xl p-3.5">
+        <span class="text-xs text-slate-400 font-medium block">Peak Demand</span>
+        <div class="text-xl font-bold text-amber-400 mt-1" id="kpiPeakDemand">-- kW</div>
+        <div class="text-[11px] text-slate-500 mt-1 truncate" id="kpiPeakTime">Timestamp</div>
+      </div>
+
+      <div class="bg-slate-900/70 border border-slate-800/80 rounded-xl p-3.5">
+        <span class="text-xs text-slate-400 font-medium block">Annualized EUI</span>
+        <div class="text-xl font-bold text-blue-400 mt-1" id="kpiEUI">-- <span class="text-xs text-slate-400 font-normal">kWh/m²</span></div>
+        <div class="text-[11px] text-slate-500 mt-1" id="kpiBenchmark">Target: --</div>
+      </div>
+
+      <div class="bg-slate-900/70 border border-slate-800/80 rounded-xl p-3.5">
+        <span class="text-xs text-slate-400 font-medium block">Utility Bill (Est.)</span>
+        <div class="text-xl font-bold text-white mt-1" id="kpiTotalBill">$--</div>
+        <div class="text-[11px] text-slate-500 mt-1">Incl. demand charges</div>
+      </div>
+
+      <div class="bg-slate-900/70 border border-slate-800/80 rounded-xl p-3.5">
+        <span class="text-xs text-slate-400 font-medium block">Carbon Emissions</span>
+        <div class="text-xl font-bold text-teal-400 mt-1" id="kpiCarbon">-- tCO2e</div>
+        <div class="text-[11px] text-slate-500 mt-1">0.412 kg/kWh grid</div>
+      </div>
+
+      <div class="bg-slate-900/70 border border-slate-800/80 rounded-xl p-3.5">
+        <span class="text-xs text-slate-400 font-medium block">Load Factor</span>
+        <div class="text-xl font-bold text-purple-400 mt-1" id="kpiLoadFactor">--%</div>
+        <div class="text-[11px] text-slate-500 mt-1">Grid efficiency metric</div>
+      </div>
+    </div>
+
+    <!-- Active Anomalies Banner -->
+    <div id="anomaliesContainer" class="hidden space-y-2">
+      <!-- Injected via JS -->
+    </div>
+
+    <!-- Charts Section -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Main Timeseries Load Profile (2 Cols) -->
+      <div class="lg:col-span-2 bg-slate-900/70 border border-slate-800/80 rounded-xl p-5">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h2 class="text-sm font-semibold text-white">Sub-System Hourly Power Profile (kW)</h2>
+            <p class="text-xs text-slate-400">Stacked submetered electrical power draw vs solar photovoltaic production</p>
+          </div>
+          <div class="flex items-center gap-3 text-xs">
+            <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-blue-500"></span>HVAC</span>
+            <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>Plugs</span>
+            <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span>Lighting</span>
+            <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-yellow-400"></span>Solar</span>
+          </div>
+        </div>
+        <div class="h-72 w-full">
+          <canvas id="timeseriesChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Subsystem Breakdown Donut (1 Col) -->
+      <div class="bg-slate-900/70 border border-slate-800/80 rounded-xl p-5 flex flex-col justify-between">
+        <div>
+          <h2 class="text-sm font-semibold text-white">End-Use Energy Breakdown</h2>
+          <p class="text-xs text-slate-400 mb-4">Distribution across building subsystems</p>
+          <div class="h-48 relative flex items-center justify-center">
+            <canvas id="breakdownChart"></canvas>
+          </div>
+        </div>
+        <div id="breakdownLegend" class="space-y-1.5 mt-3 text-xs">
+          <!-- Injected via JS -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Diurnal & Day Profile + ECM Simulator -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      
+      <!-- 24-Hour Diurnal Pattern (Weekday vs Weekend) -->
+      <div class="lg:col-span-1 bg-slate-900/70 border border-slate-800/80 rounded-xl p-5">
+        <div class="mb-4">
+          <h2 class="text-sm font-semibold text-white">Average Diurnal Profile (kW)</h2>
+          <p class="text-xs text-slate-400">24-hour mean load curve comparing working days and weekends</p>
+        </div>
+        <div class="h-56">
+          <canvas id="diurnalChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Energy Conservation Measure (ECM) Simulator -->
+      <div class="lg:col-span-2 bg-slate-900/70 border border-slate-800/80 rounded-xl p-5">
+        <div class="flex items-center justify-between mb-3 border-b border-slate-800 pb-3">
+          <div>
+            <h2 class="text-sm font-semibold text-white flex items-center gap-2">
+              <span>Energy Conservation Simulator</span>
+              <span class="text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400">Interactive ROI Engine</span>
+            </h2>
+            <p class="text-xs text-slate-400">Simulate retrofits and operational adjustments to project cost and carbon savings</p>
+          </div>
+          <button id="resetSimBtn" class="text-xs text-slate-400 hover:text-white">Reset Default</button>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mt-4">
+          <!-- Controls -->
+          <div class="space-y-4">
+            <div>
+              <div class="flex justify-between text-xs mb-1">
+                <span class="text-slate-300 font-medium">Summer HVAC Setpoint Relax</span>
+                <span class="text-emerald-400 font-mono font-semibold" id="setpointVal">+1.0 °C</span>
+              </div>
+              <input type="range" id="simHvac" min="0" max="3" step="0.5" value="1.0" class="w-full accent-emerald-500 cursor-pointer">
+              <span class="text-[11px] text-slate-500 block">Each 1°C increase saves ~6.5% chiller electricity</span>
+            </div>
+
+            <div class="flex items-center justify-between p-2.5 rounded-lg bg-slate-800/40 border border-slate-800">
+              <div>
+                <span class="text-xs font-medium text-slate-200 block">LED Lighting Retrofit</span>
+                <span class="text-[11px] text-slate-500">Upgrades fixtures to high-efficiency LED with daylight harvesting</span>
+              </div>
+              <input type="checkbox" id="simLed" checked class="w-4 h-4 accent-emerald-500 cursor-pointer">
+            </div>
+
+            <div class="flex items-center justify-between p-2.5 rounded-lg bg-slate-800/40 border border-slate-800">
+              <div>
+                <span class="text-xs font-medium text-slate-200 block">Smart Workstation Plug Controls</span>
+                <span class="text-[11px] text-slate-500">Auto-depowers phantom loads and displays outside work hours</span>
+              </div>
+              <input type="checkbox" id="simPlug" class="w-4 h-4 accent-emerald-500 cursor-pointer">
+            </div>
+
+            <div>
+              <div class="flex justify-between text-xs mb-1">
+                <span class="text-slate-300 font-medium">Rooftop Solar PV Expansion</span>
+                <span class="text-emerald-400 font-mono font-semibold" id="solarVal">+50 kWp</span>
+              </div>
+              <input type="range" id="simSolar" min="0" max="200" step="25" value="50" class="w-full accent-emerald-500 cursor-pointer">
+              <span class="text-[11px] text-slate-500 block">Installs additional monocrystalline PV modules on unused roof areas</span>
+            </div>
+          </div>
+
+          <!-- Simulation Readout Card -->
+          <div class="bg-gradient-to-br from-emerald-950/30 to-slate-900 border border-emerald-500/20 rounded-xl p-4 flex flex-col justify-between">
+            <div>
+              <span class="text-xs font-semibold text-emerald-400 uppercase tracking-wider block mb-1">Projected Annual Savings</span>
+              <div class="text-2xl font-bold text-white" id="simCostSaved">$-- / yr</div>
+              <div class="text-xs text-slate-400 mt-1 flex items-center gap-1.5">
+                <span class="text-emerald-400 font-semibold" id="simPctSaved">--%</span> total building energy reduction
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3 pt-4 border-t border-slate-800/80 mt-4 text-xs">
+              <div>
+                <span class="text-slate-400 block">CO2 Abatement</span>
+                <span class="font-bold text-teal-300 text-sm" id="simCo2Saved">-- tCO2e/yr</span>
+              </div>
+              <div>
+                <span class="text-slate-400 block">Peak Load Delta</span>
+                <span class="font-bold text-blue-300 text-sm" id="simPeakSaved">-- kW</span>
+              </div>
+              <div>
+                <span class="text-slate-400 block">Estimated Capex</span>
+                <span class="font-bold text-slate-200 text-sm" id="simCapex">$--</span>
+              </div>
+              <div>
+                <span class="text-slate-400 block">Simple Payback</span>
+                <span class="font-bold text-emerald-400 text-sm" id="simPayback">-- yrs</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <script>
+    let activeBuildingId = 'bldg-01';
+    let activeDays = 7;
+    let timeseriesChart = null;
+    let breakdownChart = null;
+    let diurnalChart = null;
+
+    // Fetch dashboard data
+    async function loadDashboard() {
+      try {
+        const res = await fetch(`/api/dashboard?building_id=${activeBuildingId}&days=${activeDays}`);
+        const data = await res.json();
+        if (data.status === 'success') {
+          renderKPIs(data.summary, data.building);
+          renderAnomalies(data.anomalies);
+          renderCharts(data.timeseries, data.summary.breakdown);
+          triggerSimulation();
+        }
+      } catch (err) {
+        console.error('Error fetching dashboard data:', err);
+      }
+    }
+
+    function renderKPIs(summary, building) {
+      document.getElementById('kpiNetEnergy').innerText = `${summary.total_net_mwh} MWh`;
+      document.getElementById('kpiSolarOffset').innerText = `${summary.solar_offset_pct}%`;
+      document.getElementById('kpiPeakDemand').innerText = `${summary.peak_demand_kw} kW`;
+      document.getElementById('kpiPeakTime').innerText = `At ${summary.peak_timestamp}`;
+      document.getElementById('kpiEUI').innerHTML = `${summary.eui_kwh_sqm} <span class="text-xs text-slate-400 font-normal">kWh/m²</span>`;
+      document.getElementById('kpiBenchmark').innerText = `Target: ${summary.benchmark_eui} (${summary.eui_performance_pct > 0 ? '+' : ''}${summary.eui_performance_pct}%)`;
+      document.getElementById('kpiTotalBill').innerText = `$${summary.total_bill.toLocaleString()}`;
+      document.getElementById('kpiCarbon').innerText = `${summary.carbon_metric_tons} tCO2e`;
+      document.getElementById('kpiLoadFactor').innerText = `${summary.load_factor_pct}%`;
+    }
+
+    function renderAnomalies(anomalies) {
+      const container = document.getElementById('anomaliesContainer');
+      if (!anomalies || anomalies.length === 0) {
+        container.classList.add('hidden');
+        return;
+      }
+      container.classList.remove('hidden');
+      container.innerHTML = anomalies.map(a => {
+        const isHigh = a.severity === 'High';
+        const borderCls = isHigh ? 'border-red-500/40 bg-red-950/20 text-red-200' : 'border-amber-500/40 bg-amber-950/20 text-amber-200';
+        const badgeCls = isHigh ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30';
+        return `
+          <div class="flex items-start justify-between p-3 rounded-lg border ${borderCls} text-xs">
+            <div class="flex items-start gap-2.5">
+              <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${badgeCls}">${a.severity}</span>
+              <div>
+                <strong class="text-white">${a.type}</strong> at <span class="font-mono text-slate-400">${a.timestamp}</span>
+                <p class="mt-0.5 text-slate-300">${a.message}</p>
+              </div>
+            </div>
+            <span class="text-slate-400 font-mono text-[11px] whitespace-nowrap">+${a.impact_kwh} kWh waste</span>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderCharts(records, breakdown) {
+      // 1. Timeseries Chart
+      const ctx1 = document.getElementById('timeseriesChart').getContext('2d');
+      const labels = records.map(r => r.timestamp.slice(5)); // MM-DD HH:MM
+      
+      if (timeseriesChart) timeseriesChart.destroy();
+      timeseriesChart = new Chart(ctx1, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              label: 'HVAC (kW)',
+              data: records.map(r => r.hvac_kw),
+              borderColor: '#3B82F6',
+              backgroundColor: 'rgba(59, 130, 246, 0.1)',
+              fill: true,
+              tension: 0.2,
+              pointRadius: 0
+            },
+            {
+              label: 'Plugs & IT (kW)',
+              data: records.map(r => r.plug_kw),
+              borderColor: '#10B981',
+              backgroundColor: 'rgba(16, 185, 129, 0.05)',
+              fill: true,
+              tension: 0.2,
+              pointRadius: 0
+            },
+            {
+              label: 'Lighting (kW)',
+              data: records.map(r => r.lighting_kw),
+              borderColor: '#F59E0B',
+              backgroundColor: 'transparent',
+              borderDash: [4, 4],
+              tension: 0.2,
+              pointRadius: 0
+            },
+            {
+              label: 'Solar PV (kW)',
+              data: records.map(r => r.solar_gen_kw),
+              borderColor: '#FACC15',
+              backgroundColor: 'rgba(250, 204, 21, 0.15)',
+              fill: true,
+              tension: 0.2,
+              pointRadius: 0
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#94a3b8', maxTicksLimit: 10 } },
+            y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#94a3b8' } }
+          }
+        }
+      });
+
+      // 2. Breakdown Donut Chart
+      const ctx2 = document.getElementById('breakdownChart').getContext('2d');
+      if (breakdownChart) breakdownChart.destroy();
+      breakdownChart = new Chart(ctx2, {
+        type: 'doughnut',
+        data: {
+          labels: breakdown.map(b => b.name),
+          datasets: [{
+            data: breakdown.map(b => b.kwh),
+            backgroundColor: breakdown.map(b => b.color),
+            borderWidth: 0
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: '72%',
+          plugins: { legend: { display: false } }
+        }
+      });
+
+      document.getElementById('breakdownLegend').innerHTML = breakdown.map(b => `
+        <div class="flex items-center justify-between">
+          <span class="flex items-center gap-2 text-slate-300">
+            <span class="w-2.5 h-2.5 rounded-sm" style="background-color: ${b.color}"></span>
+            ${b.name}
+          </span>
+          <span class="font-semibold text-slate-100">${b.pct}%</span>
+        </div>
+      `).join('');
+
+      // 3. Diurnal 24h Profile
+      const weekdayLoads = Array(24).fill(0);
+      const weekdayCounts = Array(24).fill(0);
+      const weekendLoads = Array(24).fill(0);
+      const weekendCounts = Array(24).fill(0);
+
+      records.forEach(r => {
+        const h = r.hour;
+        if (r.is_weekend) {
+          weekendLoads[h] += r.net_kw;
+          weekendCounts[h]++;
+        } else {
+          weekdayLoads[h] += r.net_kw;
+          weekdayCounts[h]++;
+        }
+      });
+
+      const avgWeekday = weekdayLoads.map((sum, i) => weekdayCounts[i] ? Math.round(sum / weekdayCounts[i]) : 0);
+      const avgWeekend = weekendLoads.map((sum, i) => weekendCounts[i] ? Math.round(sum / weekendCounts[i]) : 0);
+
+      const ctx3 = document.getElementById('diurnalChart').getContext('2d');
+      if (diurnalChart) diurnalChart.destroy();
+      diurnalChart = new Chart(ctx3, {
+        type: 'line',
+        data: {
+          labels: Array.from({length: 24}, (_, i) => `${i}:00`),
+          datasets: [
+            {
+              label: 'Weekday Avg',
+              data: avgWeekday,
+              borderColor: '#10B981',
+              tension: 0.3,
+              pointRadius: 1
+            },
+            {
+              label: 'Weekend Avg',
+              data: avgWeekend,
+              borderColor: '#64748B',
+              borderDash: [4, 4],
+              tension: 0.3,
+              pointRadius: 1
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              display: true,
+              labels: { color: '#94a3b8', boxWidth: 10, font: { size: 10 } }
+            }
+          },
+          scales: {
+            x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#94a3b8', maxTicksLimit: 8 } },
+            y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#94a3b8' } }
+          }
+        }
+      });
+    }
+
+    // Energy Conservation Simulator
+    async function triggerSimulation() {
+      const hvac = parseFloat(document.getElementById('simHvac').value);
+      const led = document.getElementById('simLed').checked;
+      const plug = document.getElementById('simPlug').checked;
+      const solar = parseFloat(document.getElementById('simSolar').value);
+
+      document.getElementById('setpointVal').innerText = `+${hvac.toFixed(1)} °C`;
+      document.getElementById('solarVal').innerText = `+${solar} kWp`;
+
+      try {
+        const res = await fetch('/api/simulate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            building_id: activeBuildingId,
+            days: activeDays,
+            hvac_setpoint_offset: hvac,
+            led_retrofit: led,
+            plug_load_control: plug,
+            add_solar_kwp: solar
+          })
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+          const sim = data.simulation;
+          document.getElementById('simCostSaved').innerText = `$${sim.annual_cost_saved.toLocaleString()} / yr`;
+          document.getElementById('simPctSaved').innerText = `${sim.pct_reduction}%`;
+          document.getElementById('simCo2Saved').innerText = `${sim.annual_co2_abated_tons} tCO2e/yr`;
+          document.getElementById('simPeakSaved').innerText = `${sim.simulated_peak_kw} kW peak`;
+          document.getElementById('simCapex').innerText = `$${sim.estimated_capex.toLocaleString()}`;
+          document.getElementById('simPayback').innerText = sim.simple_payback_years > 0 ? `${sim.simple_payback_years} yrs` : 'Immediate';
+        }
+      } catch (err) {
+        console.error('Simulation error:', err);
+      }
+    }
+
+    // Event Listeners
+    document.getElementById('buildingSelect').addEventListener('change', (e) => {
+      activeBuildingId = e.target.value;
+      loadDashboard();
+    });
+
+    document.querySelectorAll('.range-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.range-btn').forEach(b => {
+          b.className = 'range-btn px-2.5 py-1 text-xs rounded-md text-slate-400 hover:text-white transition';
+        });
+        btn.className = 'range-btn px-2.5 py-1 text-xs rounded-md bg-emerald-600 text-white font-medium transition';
+        activeDays = parseInt(btn.dataset.days);
+        loadDashboard();
+      });
+    });
+
+    ['simHvac', 'simSolar'].forEach(id => {
+      document.getElementById(id).addEventListener('input', triggerSimulation);
+    });
+    ['simLed', 'simPlug'].forEach(id => {
+      document.getElementById(id).addEventListener('change', triggerSimulation);
+    });
+
+    document.getElementById('resetSimBtn').addEventListener('click', () => {
+      document.getElementById('simHvac').value = 1.0;
+      document.getElementById('simLed').checked = true;
+      document.getElementById('simPlug').checked = false;
+      document.getElementById('simSolar').value = 50;
+      triggerSimulation();
+    });
+
+    document.getElementById('exportBtn').addEventListener('click', () => {
+      window.location.href = `/api/export?building_id=${activeBuildingId}&days=${activeDays}`;
+    });
+
+    // Initial load
+    loadDashboard();
+  </script>
+</body>
+</html>
