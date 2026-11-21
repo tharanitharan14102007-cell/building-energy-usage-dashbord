@@ -97,3 +97,4 @@ python test_backend.py
 - **Utility Bill**:
   $$\text{Bill} = \sum (\text{kWh}_t \times \text{TOU Rate}_t) + (\text{Peak kW} \times \text{Demand Charge per kW})$$
 "# building-energy-usage-dashbord" 
+"# building-energy-usage-dashbord" 
